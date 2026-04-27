@@ -2,105 +2,163 @@ import ThemeToggle from "../components/ThemeToggle";
 import { useAuth } from "../context/AuthContext";
 import { useCallSocket } from "../hooks/useCallSocket";
 import { getCallStatusText } from "../utils/callStatus";
+import { useMediaStream } from "../hooks/useMediaStream";
+import { useWebRTC } from "../hooks/useWebRTC";
 
 function VideoCallPage() {
-  const { user, logout } = useAuth();
+    const { user, logout } = useAuth();
 
-  const {
-    status,
-    partner,
-    callSessionId,
-    isInitiator,
-    lastEvent,
-    startMatching,
-    stopMatching,
-    skip,
-  } = useCallSocket();
+    const {
+        status,
+        partner,
+        callSessionId,
+        isInitiator,
+        lastEvent,
+        startMatching,
+        stopMatching,
+        skip,
+        sendEvent,
+    } = useCallSocket();
 
-  const isMatched = status === "matched";
+    const { videoRef, stream, error: mediaError, loading: mediaLoading } = useMediaStream();
 
-  return (
-    <div className="min-h-screen bg-slate-50 text-slate-950 dark:bg-slate-950 dark:text-white">
-      <header className="h-16 border-b border-slate-200 bg-white px-6 dark:border-slate-800 dark:bg-slate-900">
-        <div className="flex h-full items-center justify-between">
-          <div>
-            <h1 className="font-semibold">Random Video Call</h1>
-            <p className="text-sm text-slate-500 dark:text-slate-400">
-              Logged in as {user?.profile?.nickname || user?.name}
-            </p>
-          </div>
+    const { remoteVideoRef } = useWebRTC({
+        socketSend: sendEvent,
+        lastEvent,
+        stream,
+        isInitiator,
+        callSessionId,
+    });
 
-          <div className="flex items-center gap-3">
-            <ThemeToggle />
+    const isMatched = status === "matched";
 
-            <button
-              onClick={logout}
-              className="rounded-xl bg-slate-900 px-4 py-2 text-sm text-white hover:bg-slate-800 dark:bg-slate-700 dark:hover:bg-slate-600"
-            >
-              Logout
-            </button>
-          </div>
+    return (
+        <div className="min-h-screen bg-slate-50 text-slate-950 dark:bg-slate-950 dark:text-white">
+            <header className="h-16 border-b border-slate-200 bg-white px-6 dark:border-slate-800 dark:bg-slate-900">
+                <div className="flex h-full items-center justify-between">
+                    <div>
+                        <h1 className="font-semibold">Random Video Call</h1>
+                        <p className="text-sm text-slate-500 dark:text-slate-400">
+                            Logged in as {user?.profile?.nickname || user?.name}
+                        </p>
+                    </div>
+
+                    <div className="flex items-center gap-3">
+                        <ThemeToggle />
+
+                        <button
+                            onClick={logout}
+                            className="rounded-xl bg-slate-900 px-4 py-2 text-sm text-white hover:bg-slate-800 dark:bg-slate-700 dark:hover:bg-slate-600"
+                        >
+                            Logout
+                        </button>
+                    </div>
+                </div>
+            </header>
+
+            <main className="p-6">
+                <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm dark:border-slate-800 dark:bg-slate-900">
+                    <div className="mb-6">
+                        <p className="text-sm text-slate-500 dark:text-slate-400">Status</p>
+                        <h2 className="text-2xl font-semibold">{getCallStatusText(status)}</h2>
+                    </div>
+
+                    {partner && (
+                        <div className="mb-6 rounded-xl border border-slate-200 bg-slate-50 p-4 dark:border-slate-800 dark:bg-slate-950">
+                            <p className="text-sm text-slate-500 dark:text-slate-400">Matched with</p>
+                            <h3 className="text-lg font-semibold">{partner.nickname}</h3>
+                            <p className="text-sm text-slate-500 dark:text-slate-400">
+                                {partner.age} · {partner.gender}
+                            </p>
+
+                            <p className="mt-2 text-xs text-slate-400">
+                                Session: {callSessionId}
+                            </p>
+
+                            <p className="text-xs text-slate-400">
+                                Role: {isInitiator ? "Initiator" : "Receiver"}
+                            </p>
+                        </div>
+                    )}
+
+                    <div className="mb-6">
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+
+                            {/* Local Video */}
+                            <div className="relative rounded-2xl overflow-hidden bg-black border border-slate-200 dark:border-slate-800">
+                                <video
+                                    ref={videoRef}
+                                    autoPlay
+                                    playsInline
+                                    muted
+                                    className="w-full h-[300px] object-cover"
+                                />
+
+                                <span className="absolute bottom-2 left-2 text-xs bg-black/60 text-white px-2 py-1 rounded">
+                                    You
+                                </span>
+                            </div>
+
+                            {/* Remote Placeholder */}
+                            <div className="flex items-center justify-center rounded-2xl border border-slate-200 bg-slate-100 dark:border-slate-800 dark:bg-slate-900 h-[300px]">
+                                <p className="text-sm text-slate-500">
+                                    <video
+                                        ref={remoteVideoRef}
+                                        autoPlay
+                                        playsInline
+                                        className="w-full h-[300px] object-cover"
+                                    />
+                                </p>
+                            </div>
+
+                        </div>
+
+                        {/* Loading/Error */}
+                        {mediaLoading && (
+                            <p className="text-sm mt-3 text-slate-500">
+                                Accessing camera...
+                            </p>
+                        )}
+
+                        {mediaError && (
+                            <p className="text-sm mt-3 text-red-500">
+                                {mediaError}
+                            </p>
+                        )}
+                    </div>
+                    <div className="flex flex-wrap gap-3">
+                        <button
+                            onClick={startMatching}
+                            className="rounded-xl bg-blue-600 px-5 py-3 text-sm font-medium text-white hover:bg-blue-500"
+                        >
+                            Start Matching
+                        </button>
+
+                        <button
+                            onClick={stopMatching}
+                            className="rounded-xl bg-slate-800 px-5 py-3 text-sm font-medium text-white hover:bg-slate-700 dark:bg-slate-700 dark:hover:bg-slate-600"
+                        >
+                            Stop Matching
+                        </button>
+
+                        <button
+                            onClick={skip}
+                            disabled={!isMatched}
+                            className="rounded-xl bg-purple-600 px-5 py-3 text-sm font-medium text-white hover:bg-purple-500 disabled:cursor-not-allowed disabled:opacity-40"
+                        >
+                            Skip
+                        </button>
+                    </div>
+
+                    {lastEvent && (
+                        <pre className="mt-6 max-h-72 overflow-auto rounded-xl bg-slate-950 p-4 text-xs text-green-300 dark:bg-black">
+                            {JSON.stringify(lastEvent, null, 2)}
+                        </pre>
+                    )}
+                </section>
+            </main>
         </div>
-      </header>
-
-      <main className="p-6">
-        <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm dark:border-slate-800 dark:bg-slate-900">
-          <div className="mb-6">
-            <p className="text-sm text-slate-500 dark:text-slate-400">Status</p>
-            <h2 className="text-2xl font-semibold">{getCallStatusText(status)}</h2>
-          </div>
-
-          {partner && (
-            <div className="mb-6 rounded-xl border border-slate-200 bg-slate-50 p-4 dark:border-slate-800 dark:bg-slate-950">
-              <p className="text-sm text-slate-500 dark:text-slate-400">Matched with</p>
-              <h3 className="text-lg font-semibold">{partner.nickname}</h3>
-              <p className="text-sm text-slate-500 dark:text-slate-400">
-                {partner.age} · {partner.gender}
-              </p>
-
-              <p className="mt-2 text-xs text-slate-400">
-                Session: {callSessionId}
-              </p>
-
-              <p className="text-xs text-slate-400">
-                Role: {isInitiator ? "Initiator" : "Receiver"}
-              </p>
-            </div>
-          )}
-
-          <div className="flex flex-wrap gap-3">
-            <button
-              onClick={startMatching}
-              className="rounded-xl bg-blue-600 px-5 py-3 text-sm font-medium text-white hover:bg-blue-500"
-            >
-              Start Matching
-            </button>
-
-            <button
-              onClick={stopMatching}
-              className="rounded-xl bg-slate-800 px-5 py-3 text-sm font-medium text-white hover:bg-slate-700 dark:bg-slate-700 dark:hover:bg-slate-600"
-            >
-              Stop Matching
-            </button>
-
-            <button
-              onClick={skip}
-              disabled={!isMatched}
-              className="rounded-xl bg-purple-600 px-5 py-3 text-sm font-medium text-white hover:bg-purple-500 disabled:cursor-not-allowed disabled:opacity-40"
-            >
-              Skip
-            </button>
-          </div>
-
-          {lastEvent && (
-            <pre className="mt-6 max-h-72 overflow-auto rounded-xl bg-slate-950 p-4 text-xs text-green-300 dark:bg-black">
-              {JSON.stringify(lastEvent, null, 2)}
-            </pre>
-          )}
-        </section>
-      </main>
-    </div>
-  );
+    );
 }
 
 export default VideoCallPage;

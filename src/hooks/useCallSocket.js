@@ -46,7 +46,16 @@ export function useCallSocket() {
 
         socket.onmessage = (event) => {
             console.log("WS MESSAGE:", event.data);
-            const data = JSON.parse(event.data);
+            const raw = JSON.parse(event.data);
+            let data = raw;
+            if (raw.type === "signal_event") {
+                data = {
+                    ...raw.payload,
+                    sender_id: raw.sender,
+                };
+            }
+            console.log("WS MESSAGE:", data);
+
             setLastEvent(data);
 
             if (data.type === "connection_established") {
