@@ -7,6 +7,9 @@ export function useMediaStream() {
   const [error, setError] = useState(null);
   const [loading, setLoading] = useState(true);
 
+  const [audioEnabled, setAudioEnabled] = useState(true);
+  const [videoEnabled, setVideoEnabled] = useState(true);
+
   useEffect(() => {
     let localStream;
 
@@ -41,10 +44,36 @@ export function useMediaStream() {
     };
   }, []);
 
+  // 🎯 Toggle Audio
+  const toggleAudio = () => {
+    if (!stream) return;
+
+    stream.getAudioTracks().forEach((track) => {
+      track.enabled = !audioEnabled;
+    });
+
+    setAudioEnabled((prev) => !prev);
+  };
+
+  // 🎯 Toggle Video
+  const toggleVideo = () => {
+    if (!stream) return;
+
+    stream.getVideoTracks().forEach((track) => {
+      track.enabled = !videoEnabled;
+    });
+
+    setVideoEnabled((prev) => !prev);
+  };
+
   return {
     videoRef,
     stream,
     error,
     loading,
+    audioEnabled,
+    videoEnabled,
+    toggleAudio,
+    toggleVideo,
   };
 }

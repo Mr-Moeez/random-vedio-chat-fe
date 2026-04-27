@@ -2,30 +2,28 @@ import { useEffect, useRef } from "react";
 
 export function useWebRTC({
   socketSend,
-  lastEvent,
+  socketRegister,
   stream,
   isInitiator,
   callSessionId,
 }) {
   const peerRef = useRef(null);
   const remoteVideoRef = useRef(null);
+  const pendingEventsRef = useRef([]);
   const hasCreatedOfferRef = useRef(false);
-  const pendingCandidatesRef = useRef([]);
-  const pendingEventsRef = useRef([]); 
-  
-  const resetPeer = () => {
+
+  const resetConnection = () => {
+    console.log("WEBRTC: FULL RESET");
+
     if (peerRef.current) {
-      console.log("WEBRTC: resetting old peer");
       peerRef.current.ontrack = null;
       peerRef.current.onicecandidate = null;
-      peerRef.current.onconnectionstatechange = null;
-      peerRef.current.oniceconnectionstatechange = null;
       peerRef.current.close();
       peerRef.current = null;
     }
 
     hasCreatedOfferRef.current = false;
-    pendingCandidatesRef.current = [];
+    pendingEventsRef.current = [];
 
     if (remoteVideoRef.current) {
       remoteVideoRef.current.srcObject = null;
@@ -33,159 +31,130 @@ export function useWebRTC({
   };
 
   useEffect(() => {
+    if (!socketRegister) return;
+
+    socketRegister(async (event) => {
+      const peer = peerRef.current;
+
+      if (!peer) {
+        pendingEventsRef.current.push(event);
+        return;
+      }
+
+      await handleSignalEvent(peer, event);
+    });
+  }, [socketRegister]);
+
+  useEffect(() => {
     if (!stream || !callSessionId) {
-      resetPeer();
+      resetConnection();
       return;
     }
 
-    resetPeer();
-
-    console.log("WEBRTC: creating peer", { isInitiator, callSessionId });
+    resetConnection();
 
     const peer = new RTCPeerConnection({
       iceServers: [{ urls: "stun:stun.l.google.com:19302" }],
     });
 
     peerRef.current = peer;
+    hasCreatedOfferRef.current = false;
+
+    console.log("WEBRTC: peer created", { isInitiator });
 
     stream.getTracks().forEach((track) => {
       peer.addTrack(track, stream);
     });
 
     peer.ontrack = (event) => {
-      console.log("WEBRTC: remote stream received", event.streams);
+      const videoEl = remoteVideoRef.current;
+      if (!videoEl) return;
 
-      if (remoteVideoRef.current && event.streams[0]) {
-        remoteVideoRef.current.srcObject = event.streams[0];
-      }
+      const stream = event.streams[0];
+      if (!stream) return;
+
+      // 🔥 HARD RESET VIDEO
+      videoEl.srcObject = null;
+
+      setTimeout(() => {
+        videoEl.srcObject = stream;
+
+        videoEl.onloadedmetadata = () => {
+          videoEl.play().catch(() => { });
+        };
+      }, 0);
     };
 
     peer.onicecandidate = (event) => {
-      if (!event.candidate) return;
-
-      console.log("WEBRTC: sending ICE");
-
-      socketSend({
-        type: "ice_candidate",
-        candidate: event.candidate,
-      });
-    };
-
-    peer.onconnectionstatechange = () => {
-      console.log("WEBRTC connection:", peer.connectionState);
-    };
-
-    peer.oniceconnectionstatechange = () => {
-      console.log("ICE connection:", peer.iceConnectionState);
+      if (event.candidate) {
+        socketSend({
+          type: "ice_candidate",
+          candidate: event.candidate,
+        });
+      }
     };
 
     if (isInitiator) {
       createOffer(peer);
     }
 
+    pendingEventsRef.current.forEach((e) =>
+      handleSignalEvent(peer, e)
+    );
+    pendingEventsRef.current = [];
+
     return () => {
-      resetPeer();
+      resetConnection(); // 🔥 CRITICAL CLEANUP
     };
-  }, [stream, callSessionId, isInitiator, socketSend]);
+  }, [stream, callSessionId, isInitiator]);
 
-  useEffect(() => {
-    if (
-      lastEvent?.type === "call_ended" ||
-      lastEvent?.type === "matching_stopped" ||
-      lastEvent?.type === "user_disconnected"
-    ) {
-      resetPeer();
-    }
-  }, [lastEvent]);
+  async function handleSignalEvent(peer, event) {
+    try {
+      if (event.type === "offer") {
+        console.log("RECEIVED OFFER");
 
-  useEffect(() => {
-    if (!lastEvent) return;
+        await peer.setRemoteDescription(
+          new RTCSessionDescription(event.sdp)
+        );
 
-    const peer = peerRef.current;
+        const answer = await peer.createAnswer();
+        await peer.setLocalDescription(answer);
 
-    if (!peer) {
-      console.log("WEBRTC: peer not ready, queueing", lastEvent.type);
-      pendingEventsRef.current.push(lastEvent);
-      return;
-    }
-
-    async function handleEvent() {
-      try {
-        if (lastEvent.type === "offer") {
-          console.log("WEBRTC: received offer");
-
-          await peer.setRemoteDescription(
-            new RTCSessionDescription(lastEvent.sdp)
-          );
-
-          const answer = await peer.createAnswer();
-          await peer.setLocalDescription(answer);
-
-          console.log("WEBRTC: sending answer");
-
-          socketSend({
-            type: "answer",
-            sdp: answer,
-          });
-
-          for (const candidate of pendingCandidatesRef.current) {
-            await peer.addIceCandidate(new RTCIceCandidate(candidate));
-          }
-
-          pendingCandidatesRef.current = [];
-          return;
-        }
-
-        if (lastEvent.type === "answer") {
-          console.log("WEBRTC: received answer");
-
-          if (!peer.currentRemoteDescription) {
-            await peer.setRemoteDescription(
-              new RTCSessionDescription(lastEvent.sdp)
-            );
-          }
-
-          return;
-        }
-
-        if (lastEvent.type === "ice_candidate") {
-          console.log("WEBRTC: received ICE");
-
-          if (peer.remoteDescription) {
-            await peer.addIceCandidate(
-              new RTCIceCandidate(lastEvent.candidate)
-            );
-          } else {
-            pendingCandidatesRef.current.push(lastEvent.candidate);
-          }
-        }
-      } catch (error) {
-        console.error("WEBRTC error:", error);
+        socketSend({ type: "answer", sdp: answer });
       }
-    }
 
-    handleEvent();
-  }, [lastEvent, socketSend]);
+      if (event.type === "answer") {
+        console.log("RECEIVED ANSWER");
+
+        await peer.setRemoteDescription(
+          new RTCSessionDescription(event.sdp)
+        );
+      }
+
+      if (event.type === "ice_candidate") {
+        if (peer.remoteDescription) {
+          await peer.addIceCandidate(
+            new RTCIceCandidate(event.candidate)
+          );
+        } else {
+          pendingEventsRef.current.push(event);
+        }
+      }
+    } catch (err) {
+      console.error("WEBRTC ERROR:", err);
+    }
+  }
 
   async function createOffer(peer) {
     if (hasCreatedOfferRef.current) return;
 
     hasCreatedOfferRef.current = true;
 
-    console.log("WEBRTC: creating offer");
-
     const offer = await peer.createOffer();
     await peer.setLocalDescription(offer);
 
-    console.log("WEBRTC: sending offer");
-
-    socketSend({
-      type: "offer",
-      sdp: offer,
-    });
+    socketSend({ type: "offer", sdp: offer });
   }
 
-  return {
-    remoteVideoRef,
-  };
+  return { remoteVideoRef };
 }
